@@ -23,7 +23,7 @@ canvas.bind("<Enter>",
 		)
 )
 
-#frame for content - root
+#frame for content - canvas
 frame = tk.Frame(canvas, background="#FFFFFF")
 pRow = 0
 

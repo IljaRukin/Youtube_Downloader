@@ -555,95 +555,99 @@ class windowPopUp(tk.Toplevel):
 	
 	def __init__(self, duplicates, var):
 		tk.Toplevel.__init__(self)
-		self.title("resolve url duplicates")
-		self.geometry('350x75')
-		self.minsize(600, 400)
+		self.title("please select where to keep duplicate url")
+		self.geometry('400x300')
+		#self.minsize(600, 400)
 		#self.maxsize(425, 250)
 		self.rowconfigure(0, weight=0)
 		self.rowconfigure(1, weight=1)
 		self.columnconfigure(0, weight=1)
-
-		selection_frame = tk.Frame(self)
-		selection_frame.grid(row=0, column=0, sticky='nsew')
-		#selection_frame.columnconfigure(0, weight=1)
-		#selection_frame.columnconfigure(1, weight=1)
 		
+		#canvas & scrollbar - root
+		canvas = tk.Canvas(self)
+		scroll = tk.Scrollbar(self, orient="vertical")
+		
+		#place canvas & scrollbar
+		#scroll.grid(row=0, column=1, sticky="nes") #grid#
+		scroll.pack(side="right", fill="y") #pack#
+		#canvas.grid(row=0, column=0, sticky="nsew") #grid#
+		canvas.pack(fill="both", expand=1, anchor="nw") #pack#
+		
+		#enable scrolling
+		scroll.configure(command=canvas.yview)
+		canvas.configure(yscrollcommand=scroll.set)
+		canvas.bind("<Enter>",
+				lambda _: canvas.bind_all('<MouseWheel>', 
+						lambda e: canvas.config( canvas.yview_scroll(int(-1*(e.delta/120)), "units") )
+				)
+		)
+		
+		#frame for content - canvas
+		frame = tk.Frame(canvas, background="#FFFFFF")
 		gridrow = 0
-		title = ttk.Label(selection_frame, text="please select where to keep duplicate url")
-		title.grid(row=gridrow, column=0, columnspan=2, pady=(7, 7))
+		
+		#label - frame
+		title1 = tk.Label(frame, text='title')
+		#title1.grid(row=gridrow, column=0, sticky="n") #grid#
+		title1.pack(fill=tk.BOTH, expand=tk.TRUE, anchor="n") #pack#
 		gridrow += 1
-		
-		Canv = tk.Canvas(selection_frame, bg="yellow")
-		Canv.grid(row=gridrow, column=0, sticky = tk.NSEW)
-		vsbar = tk.Scrollbar(selection_frame, orient=tk.VERTICAL, command=Canv.yview)
-		vsbar.grid(row=gridrow, column=0, sticky = tk.NSEW)
-		gridrow += 1
-		
-		Canv.configure(yscrollcommand=vsbar.set)
-		
-		# frame of checkboxes
-		check_frame = tk.Frame(selection_frame, bg="Blue")
-		#check_frame.grid(row=0, column=0, sticky=(tk.N,tk.W))
 		
 		#for python 3.9+ (dict order constant)
 		self.duplicates = duplicates
 		self.selection = dict()
 		for link,presentFiles in self.duplicates.items():
-			#button_frame = tk.Frame(check_frame)
-			check_frame.grid(row=gridrow, column=0, sticky='nsew')
+			#button_frame = tk.Frame(frame)
+			#button_frame.grid(row=gridrow, column=0, sticky="") #grid#
+			#button_frame.pack(anchor="center") #pack#
 			gridrow += 1
 			
 			#link
-			tk.Label(check_frame, text=str(link)).grid(row=gridrow, column=0, columnspan=2)
+			linkLabel = tk.Label(frame, text=str(link))
+			#linkLabel.grid(row=gridrow, column=0, sticky="") #grid#
+			linkLabel.pack(fill=tk.BOTH, expand=tk.TRUE, anchor="center") #pack#
 			gridrow += 1
 			
 			maxcol = 0
 			#//present in files:
 			self.selection[link] = tk.IntVar()
 			for pos in range(len(presentFiles)):
-				tk.Radiobutton(check_frame,
-				text=str(presentFiles[pos]),
-				padx = 4,
-				variable=self.selection[link],
-				value=pos).grid(row=gridrow, column=pos, sticky='e')
+				radiobutton = tk.Radiobutton(frame,
+					text=str(presentFiles[pos]),
+					padx = 4,
+					variable=self.selection[link],
+					value=pos)
+				#radiobutton.grid(row=gridrow, column=pos, sticky="w") #grid#
+				radiobutton.pack(expand=tk.FALSE, anchor="center") #pack#
 			if pos > maxcol:
 				maxcol = pos
 			gridrow += 1
 			self.selection[link].set(0)
 		gridrow += 1
 		
-		#inserted frame into canvas
-		item = Canv.create_window(( 1, 2 ), anchor = tk.NW,  window = check_frame )
-
-# 		#for python 3.9+ (dict order constant)
-# 		self.duplicates = duplicates
-# 		self.selection = dict()
-# 		for link,presentFiles in self.duplicates.items():
-# 			button_frame = tk.Frame(self)
-# 			button_frame.grid(row=gridrow, column=0, sticky='nsew')
-# 			gridrow += 1
-# 			
-# 			#link
-# 			tk.Label(selection_frame, text=str(link)).grid(row=gridrow, column=0, columnspan=2)
-# 			gridrow += 1
-# 			
-# 			#//present in files:
-# 			self.selection[link] = tk.IntVar()
-# 			for pos in range(len(presentFiles)):
-# 				tk.Radiobutton(button_frame,
-# 				text=str(presentFiles[pos]),
-# 				padx = 4,
-# 				variable=self.selection[link],
-# 				value=pos).grid(row=gridrow, column=pos, sticky='e')
-# 			gridrow += 1
-# 			self.selection[link].set(0)
-			
-		submitButton = tk.Button(selection_frame, text='Done', command=self.submit)
-		submitButton.grid(row=gridrow, column=0, columnspan=2)
+		#button - frame
+		#submitButton = tk.Button(frame, text="done", command=self.destroy)
+		submitButton = tk.Button(frame, text="done", command=self.submit)
+		#submitButton.grid(row=gridrow, column=0, sticky="s") #grid#
+		submitButton.pack(fill=tk.BOTH, expand=tk.TRUE, anchor="s") #pack#
 		gridrow += 1
-		#tk.Button(selection_frame, text='Done', command=self.destroy).grid(row=gridrow, column=0, columnspan=2)
-		#gridrow += 1
 		
+		#add frame to canvas - canvas
+		wrapFrame = canvas.create_window((0,0), window=frame, anchor="nw")
+		
+		def onFrameConfigure(canvas):
+		    canvas.configure(scrollregion=canvas.bbox("all")) #show scroll bar
+		    canvas.itemconfigure(wrapFrame, width=canvas.winfo_width()) #correct canvas size
+		    return None
+		canvas.bind("<Configure>", lambda e: onFrameConfigure(canvas))
+		
+		# expand canvas
+		#self.columnconfigure((0), weight=1) #grid#
+		#self.rowconfigure((0), weight=1) #grid#
+		
+		# expand frame
+		#frame.columnconfigure((0), weight=1) #grid#
+		#frame.rowconfigure((0), weight=1) #grid#
+
 		self.transient(self.master) #same visibility as window below
 		self.grab_set()  #this window on top
 		self.wait_window(self) #continue after window closes
