@@ -1,6 +1,5 @@
 import sys
 import os
-import re
 import requests
 import pytube
 from moviepy.editor import AudioFileClip
@@ -8,6 +7,7 @@ from pathvalidate import sanitize_filename
 import tkinter as tk
 import tkinter.filedialog
 import tkinter.ttk as ttk
+import time
 import traceback
 #print(traceback.format_exc())
 
@@ -22,10 +22,9 @@ class DownloadHandler():
 	def filterId(self, link):
 		'''extract video id\n
 		used for collecting urls from playlist'''
-		#link = link.strip('\n')
-		#pos = link.find("?v=")
-		#return link[pos+3:pos+13+1]
-		return re.search("(?:v=|\/)([0-9A-Za-z_-]{11})", link)[0][2:]
+		link = link.strip('\n')
+		pos = link.find("?v=")
+		return link[pos+3:pos+13+1]
 
 	def filterName(self, filename):
 		'''make filename valid for windows\n
@@ -35,25 +34,25 @@ class DownloadHandler():
 #		filename = filename.lower()
 		return filename
 
-	def saveLinks(self, extractedLinks, newLinksFile):
-		'''save inks to file in toDownloadLinksFolder'''
-		newLinksPath = os.path.join(self.toDownloadLinksFolder,newLinksFile)
-		with open(newLinksPath,"w",encoding='utf-8') as f:
-			while extractedLinks:
-				link = extractedLinks.pop()
+	def saveLinks(self, links, file):
+		'''save links to file in toDownloadLinksFolder'''
+		path = os.path.join(self.toDownloadLinksFolder,file)
+		with open(path,"a",encoding='utf-8') as f:
+			while links:
+				link = links.pop()
 				f.write('%s\n' % link)
 		return None
 
-	def loadLinks(self, linkPath):
-		"""list links from linkPath"""
+	def loadLinks(self, path):
+		"""list links from path"""
 		links = list()
-		with open(linkPath,"r",encoding='utf-8') as f:
+		with open(path,"r",encoding='utf-8') as f:
 			for line in f:
 				line = line.strip('\n')
 				links.append(line)
 		return links
 
-	def ListFiles(self, folder, fileEnding=None):
+	def listFiles(self, folder, fileEnding=None):
 		"""list all files saved in folder\n
 		(optionally with sspecific ending)"""
 		fileList = list()
@@ -74,14 +73,14 @@ class DownloadHandler():
 	def listOfAllLinks(self, folder, fileEnding):
 		"""list all links saved in folder in Dict"""
 		links = list()
-		for file in self.ListFiles(folder, fileEnding):
+		for file in self.listFiles(folder, fileEnding):
 			links[file] = self.loadLinks(file)
 		return links
 	
 	def dictOfAllLinks(self, folder, fileEnding):
 		"""list all links saved in folder/files in List"""
 		links = dict()
-		for file in self.ListFiles(folder, fileEnding):
+		for file in self.listFiles(folder, fileEnding):
 			links[file] = self.loadLinks(file)
 		return links
 
@@ -89,13 +88,15 @@ class DownloadHandler():
 		"""get all links from playlist"""
 		playlist = pytube.Playlist(playlistUrl)
 		links = playlist.video_urls
-		return [self.filterId(link) for link in links]
+		links = [self.filterId(link) for link in links]
+		playlistName = playlist.title
+		channelName = playlist.owner
+		return links, playlistName, channelName
 
-	### get channel upload list
-	def channelLinks(self, channelLink):
+	def channelPlaylist(self, channelUrl):
 		
 		#request channel page
-		response = requests.get(channelLink)
+		response = requests.get(channelUrl)
 		response.raise_for_status()
 		body = response.text
 		
@@ -103,8 +104,8 @@ class DownloadHandler():
 		keyword = "\"browseId\":\"UC"
 		pos1 = body.find(keyword)+len(keyword)
 		pos2 = body.find("\"",pos1)
-		channelPlaylistUrl = "https://www.youtube.com/playlist?list=UU"
-		channelPlaylistUrl += body[pos1:pos2]
+		playlistUrl = "https://www.youtube.com/playlist?list=UU"
+		playlistUrl += body[pos1:pos2]
 		
 		#extract channel name
 		keyword = "\"name\": \""
@@ -112,41 +113,34 @@ class DownloadHandler():
 		pos2 = body.find("\"",pos1)
 		channelName = body[pos1:pos2]
 		
-		#load links
-		linkFile = channelName+'.txt','w'
-		channelLinks = self.collectLinks(channelPlaylistUrl)
-		with open(linkFile,encoding='utf-8') as f:
-			while channelLinks:
-				link = channelLinks.pop()
-				f.write('%s\n' % link)
-		return linkFile
+		return playlistUrl, channelName
 	
 	#--- save execution
-
-	def compareOldLinks(self, newLinksFile):
-		"""compare links from newLinksFile to oldLinks"""
+	
+	def findDuplicateLinks(self, newLinksFile):
+		"""compare links from newLinksFile to links in files inside downloadedLinksFolder"""
 		newLinksPath = os.path.join(self.toDownloadLinksFolder,newLinksFile)
 		oldLinks = self.dictOfAllLinks(self.downloadedLinksFolder,[".txt"])
 		checkedLinks = list()
 		duplicates = dict()
 		
 		#read all links
-		newLinks = self.loadLinks(newLinksPath)
-		newLinks = list(set(newLinks))
+		newLinksList = self.loadLinks(newLinksPath)
+		newLinksList = list(set(newLinksList))
 		
 		#check all files on duplicates
-		while newLinks:
-			link = newLinks.pop()
+		while newLinksList:
+			newLink = newLinksList.pop()
 			linkIsOld = False
-			for oldLinksFile,oldLinksList in oldLinks.items():
-				if link in oldLinksList:
+			for oldLinksPath,oldLinksList in oldLinks.items():
+				if newLink in oldLinksList:
 					linkIsOld = True
-					if link not in duplicates:
-						duplicates[link] = [newLinksPath]
-					duplicates[link].append(oldLinksFile)
+					if newLink not in duplicates:
+						duplicates[newLink] = [newLinksPath]
+					duplicates[newLink].append(oldLinksPath)
 			if not linkIsOld:
-				checkedLinks.append(link)
-		del newLinks
+				checkedLinks.append(newLink)
+		del newLinksList
 
 		#list all filePaths with duplicates
 		allDuplicateFiles = set()
@@ -157,6 +151,7 @@ class DownloadHandler():
 		if newLinksPath in allDuplicateFiles:
 			allDuplicateFiles.remove(newLinksPath)
 		
+		'''
 		#decide what to do with duplicates
 		keepLink = dict() #list of filePaths where to keep link
 		deleteLink = dict() #list of filePaths where to delete link from
@@ -166,7 +161,12 @@ class DownloadHandler():
 		#keepLink["NFBP9nJkec8"] = 'downloadedLinks\\test2.txt'
 		#deleteLink["NFBP9nJkec8"][0] = 'toDownloadLinks\\test.txt'
 		del duplicates
-
+		'''
+		return duplicates,checkedLinks,allDuplicateFiles
+		
+	def deleteDuplicateLinks(self,newLinksFile,checkedLinks,allDuplicateFiles,keepLink,deleteLink):
+		newLinksPath = os.path.join(self.toDownloadLinksFolder,newLinksFile)
+		
 		#edit files
 		try:
 			#add links to current file
@@ -286,25 +286,13 @@ class DownloadHandler():
 					fff.write('%s\n' % item)
 			sys.exit(0)
 	
-	def mp4TOmp3(self):
-		#find all mp4 files
-		arr = os.listdir()
-		if len(arr) > 0:
-			for n in range(len(arr)-1,-1,-1):
-				if arr[n][-4:]!='.mp4':
-					arr.pop(n)
-
-			#convert to mp3
-			while len(arr)>0:
-				filename = arr.pop(0)
-				audioclip = AudioFileClip(filename)
-				audioclip.write_audiofile(filename[:-4]+'.mp3')
-				print('---removing: ',filename)
-				os.remove(filename)
-
-			audioclip.close()
-		else:
-			print('no .pm4 files left !')
+	def Mp4ToMp3(self,filename):
+		print('---converting to mp3: ',filename)
+		audioclip = AudioFileClip(filename)
+		audioclip.write_audiofile(filename[:-4]+'.mp3')
+		print('---removing: ',filename)
+		os.remove(filename)
+		audioclip.close()
 
 ### GUI
 
@@ -339,14 +327,12 @@ class Gui(tk.Tk):
 					text="yes authenticate",
 					padx = 20,
 					variable=self.useAuthentication,
-					value=True,
-					command=self.hideMediaSelectionFrame).pack(side = tk.LEFT)
+					value=True).pack(side = tk.LEFT)
 		tk.Radiobutton(useAuthentication_frame,
 					text="no authentication",
 					padx = 20,
 					variable=self.useAuthentication,
-					value=False,
-					command=self.showMediaSelectionFrame).pack(side = tk.LEFT)
+					value=False).pack(side = tk.LEFT)
 		self.useAuthentication.set(False)
 		
 		processingType_frame = tk.Frame(self)
@@ -388,6 +374,8 @@ class Gui(tk.Tk):
 					variable=self.audioOnly,
 					value=False).pack(side = tk.LEFT)
 		self.audioOnly.set(True)
+		
+		#----------
 		
 		#link	 -> extract/download
 		self.link_frame = tk.Frame(self)
@@ -452,100 +440,227 @@ class Gui(tk.Tk):
 
 		#----------
 
+		#all Linklists -> extract/download
+		self.duplicates_frame = tk.Frame(self)
+		self.duplicates_frame.pack(side = tk.TOP, padx='5', pady='5')
+
+		self.allFiles_button = tk.Button(self.duplicates_frame, command=self.processDuplicates,
+									 text='remove duplicates', width = 24)
+		self.allFiles_button.pack(side = tk.LEFT, padx='5', pady='5')
+
+		#----------
+
 		self.link.set("https://www.youtube.com/watch?v=dOVvmUqmRCk")
 		self.playlist.set("https://www.youtube.com/playlist?list=UUwIgPuUJXuf2nY-nKsEvLOg")
 		self.channel.set("https://www.youtube.com/channel/UCwIgPuUJXuf2nY-nKsEvLOg")
-		self.file.set("C:/Users/User/Downloads/Youtube_Downloader/toDownloadLinks/test.txt")
+		self.file.set("C:/Users/toxin/Downloads/Youtube_Downloader/toDownloadLinks/test.txt")
+		
+	def processDuplicates(self):
+		#only keep one copy onf last extracted
+		newLinksFile = "AirwaveMusicTV - Copy.txt"
+		[duplicates,checkedLinks,allDuplicateFiles] = self.session.findDuplicateLinks(newLinksFile)
+		print("duplicates: ", duplicates)
+		print("checkedLinks: ", checkedLinks)
+		print("allDuplicateFiles: ", allDuplicateFiles) #if len(duplicates)>0:
+		duplicateRemover = windowPopUp(duplicates,self.link)
+		print("keepLink: ", duplicateRemover.keepLink)
+		print("deleteLink: ", duplicateRemover.deleteLink)
+		self.session.deleteDuplicateLinks(newLinksFile,checkedLinks,allDuplicateFiles,duplicateRemover.keepLink,duplicateRemover.deleteLink)
 		
 	def hideMediaSelectionFrame(self):
 		self.mediaSelection_frame.pack_forget()
 			
 	def showMediaSelectionFrame(self):
 		self.mediaSelection_frame.pack(side = tk.TOP, padx='5', pady='5',
-							before=self.file_frame)
+							before=self.link_frame)
 		
 	def browseFiles(self, event):
 		filename = tk.filedialog.askopenfilename(initialdir = "./toDownloadLinks",
-					  title = "Select Link file",
-					  filetypes = (("Text files",
+						title = "Select Link file",
+						filetypes = (("Text files",
 							"*.txt*"),
-							   ("all files",
+								 ("all files",
 							"*.*")))
 		self.file.set(filename)
 		return None
 	
-	def processFile(self):
-		'''
-		extractedLinks = session.collectLinks(playlistUrl)
-		session.saveLinks(extractedLinks, newLinksFile)
-		session.compareOldLinks(newLinksFile)
-		audioOnly = self.audioOnly.get()
-		authenticate = self.useAuthentication.get()
-		session.downloadFiles(newLinksFile, audioOnly, authenticate)
-		'''
-		
 	def processLink(self):
+		linkUrl = str(self.link.get())
+		links = [self.session.filterId(linkUrl)]
+		fileName = "singleLinks.txt"
+		self.session.saveLinks(links, fileName)
+		[duplicates,checkedLinks,allDuplicateFiles] = self.session.findDuplicateLinks(fileName)
+		duplicateRemover = windowPopUp(duplicates,self.link)
+		self.session.deleteDuplicateLinks(fileName,checkedLinks,allDuplicateFiles,duplicateRemover.keepLink,duplicateRemover.deleteLink)
+
 		if self.extractOnly.get():
-			print("extracting link: "+str(self.file.get()))
+			print("extracting link: "+linkUrl)
 		else:
-			print("downloading link: "+str(self.file.get()))
-		extractedLinks = session.collectLinks(playlistUrl)
-		session.saveLinks(extractedLinks, newLinksFile)
-		session.compareOldLinks(newLinksFile)
-		audioOnly = self.audioOnly.get()
-		authenticate = self.useAuthentication.get()
-		session.downloadFiles(newLinksFile, audioOnly, authenticate)
+			print("downloading link: "+linkUrl)
+			audioOnly = self.audioOnly.get()
+			authenticate = self.useAuthentication.get()
+			self.session.downloadFiles(fileName, audioOnly, authenticate)
 		
 	def processPlaylist(self):
+		playlistUrl = str(self.playlist.get())
+		[links, playlistName, channelName] = self.session.collectLinks(playlistUrl)
+		fileName = playlistName+".txt"
+		self.session.saveLinks(links, fileName)
+#		self.session.findDuplicateLinks(fileName)
 		if self.extractOnly.get():
-			print("extracting playlist: "+str(self.playlist.get()))
+			print("extracting playlist: "+playlistUrl)
 		else:
-			print("downloading playlist: "+str(self.playlist.get()))
-			#self.audioOnly.get()
-		
+			print("downloading playlist: "+playlistUrl)
+			audioOnly = self.audioOnly.get()
+			authenticate = self.useAuthentication.get()
+			self.session.downloadFiles(fileName, audioOnly, authenticate)
+	
 	def processChannel(self):
+		channelUrl = str(self.channel.get())
+		[playlistUrl, channelName] = self.session.channelPlaylist(channelUrl)
+		[links, playlistName, _] = self.session.collectLinks(playlistUrl)
+		fileName = channelName+".txt"
+		self.session.saveLinks(links, fileName)
+#		self.session.findDuplicateLinks(fileName)
 		if self.extractOnly.get():
-			print("extracting channel: "+str(self.channel.get()))
+			print("extracting channel: "+channelUrl)
 		else:
-			print("downloading channel: "+str(self.channel.get()))
-			#self.audioOnly.get()
-		
+			print("downloading channel: "+channelUrl)
+			audioOnly = self.audioOnly.get()
+			authenticate = self.useAuthentication.get()
+			self.session.downloadFiles(fileName, audioOnly, authenticate)
+	
 	def processFile(self):
-		print("download selected extracted Links")
+		path = self.file.get()
+		fileName = os.path.basename( self.session.loadLinks(path) )
+		print("download extracted Links: "+path)
+#		self.session.findDuplicateLinks(path)
+		audioOnly = self.audioOnly.get()
+		authenticate = self.useAuthentication.get()
+		self.session.downloadFiles(fileName, audioOnly, authenticate)
 		
 	def processAllFiles(self):
+		fileNames = self.session.listOfAllLinks(self.toDownloadLinksFolder)
 		print("download all extracted Links")
+		for path in fileNames:
+#			self.session.findDuplicateLinks(path)
+			fileName = os.path.basename(path)
+			audioOnly = self.audioOnly.get()
+			authenticate = self.useAuthentication.get()
+			self.session.downloadFiles(fileName, audioOnly, authenticate)
 		
-	def promptSelection(self):
-		print("running")
-		title = "my title"
-		message = "my message"
-		windowPopUp(title, message)
-
 class windowPopUp(tk.Toplevel):
+	keepLink = dict() #list of filePaths where to keep link
+	deleteLink = dict() #list of filePaths where to delete link from
 	
-	def __init__(self, title, message):
+	def __init__(self, duplicates, var):
 		tk.Toplevel.__init__(self)
-		self.title(title)
+		self.title("resolve url duplicates")
 		self.geometry('350x75')
-		self.minsize(350, 75)
-		self.maxsize(425, 250)
+		self.minsize(600, 400)
+		#self.maxsize(425, 250)
 		self.rowconfigure(0, weight=0)
 		self.rowconfigure(1, weight=1)
 		self.columnconfigure(0, weight=1)
 
-		button_frame = tk.Frame(self)
-		button_frame.grid(row=0, column=0, sticky='nsew')
-		button_frame.columnconfigure(0, weight=1)
-		button_frame.columnconfigure(1, weight=1)
+		selection_frame = tk.Frame(self)
+		selection_frame.grid(row=0, column=0, sticky='nsew')
+		#selection_frame.columnconfigure(0, weight=1)
+		#selection_frame.columnconfigure(1, weight=1)
+		
+		gridrow = 0
+		title = ttk.Label(selection_frame, text="please select where to keep duplicate url")
+		title.grid(row=gridrow, column=0, columnspan=2, pady=(7, 7))
+		gridrow += 1
+		
+		Canv = tk.Canvas(selection_frame, bg="yellow")
+		Canv.grid(row=gridrow, column=0, sticky = tk.NSEW)
+		vsbar = tk.Scrollbar(selection_frame, orient=tk.VERTICAL, command=Canv.yview)
+		vsbar.grid(row=gridrow, column=0, sticky = tk.NSEW)
+		gridrow += 1
+		
+		Canv.configure(yscrollcommand=vsbar.set)
+		
+		# frame of checkboxes
+		check_frame = tk.Frame(selection_frame, bg="Blue")
+		#check_frame.grid(row=0, column=0, sticky=(tk.N,tk.W))
+		
+		#for python 3.9+ (dict order constant)
+		self.duplicates = duplicates
+		self.selection = dict()
+		for link,presentFiles in self.duplicates.items():
+			#button_frame = tk.Frame(check_frame)
+			check_frame.grid(row=gridrow, column=0, sticky='nsew')
+			gridrow += 1
+			
+			#link
+			tk.Label(check_frame, text=str(link)).grid(row=gridrow, column=0, columnspan=2)
+			gridrow += 1
+			
+			maxcol = 0
+			#//present in files:
+			self.selection[link] = tk.IntVar()
+			for pos in range(len(presentFiles)):
+				tk.Radiobutton(check_frame,
+				text=str(presentFiles[pos]),
+				padx = 4,
+				variable=self.selection[link],
+				value=pos).grid(row=gridrow, column=pos, sticky='e')
+			if pos > maxcol:
+				maxcol = pos
+			gridrow += 1
+			self.selection[link].set(0)
+		gridrow += 1
+		
+		#inserted frame into canvas
+		item = Canv.create_window(( 1, 2 ), anchor = tk.NW,  window = check_frame )
 
-		ttk.Label(button_frame, text=message).grid(row=0, column=0, columnspan=2, pady=(7, 7))
-		ttk.Button(button_frame, text='OK', command=self.destroy).grid(row=1, column=0, sticky='e')
-		ttk.Button(button_frame, text='Details', command=self.selectDuplicates).grid(row=1, column=1, sticky='w')
+# 		#for python 3.9+ (dict order constant)
+# 		self.duplicates = duplicates
+# 		self.selection = dict()
+# 		for link,presentFiles in self.duplicates.items():
+# 			button_frame = tk.Frame(self)
+# 			button_frame.grid(row=gridrow, column=0, sticky='nsew')
+# 			gridrow += 1
+# 			
+# 			#link
+# 			tk.Label(selection_frame, text=str(link)).grid(row=gridrow, column=0, columnspan=2)
+# 			gridrow += 1
+# 			
+# 			#//present in files:
+# 			self.selection[link] = tk.IntVar()
+# 			for pos in range(len(presentFiles)):
+# 				tk.Radiobutton(button_frame,
+# 				text=str(presentFiles[pos]),
+# 				padx = 4,
+# 				variable=self.selection[link],
+# 				value=pos).grid(row=gridrow, column=pos, sticky='e')
+# 			gridrow += 1
+# 			self.selection[link].set(0)
+			
+		submitButton = tk.Button(selection_frame, text='Done', command=self.submit)
+		submitButton.grid(row=gridrow, column=0, columnspan=2)
+		gridrow += 1
+		#tk.Button(selection_frame, text='Done', command=self.destroy).grid(row=gridrow, column=0, columnspan=2)
+		#gridrow += 1
+		
+		self.transient(self.master) #same visibility as window below
+		self.grab_set()  #this window on top
+		self.wait_window(self) #continue after window closes
 	
-	@staticmethod
-	def selectDuplicates():
-		print("test")
+	def submit(self):
+		for link,presentFiles in self.duplicates.items():
+			self.keepLink[link] = presentFiles.pop( self.selection[link].get() )
+			self.deleteLink[link] = presentFiles
+		self.destroy
+		return None
+
+'''
+#TODO
+-blackList
+-update playlist from youtube
+-check files with downloadedLinks
+'''
 
 if __name__ == '__main__':
 	App = Gui().mainloop()
