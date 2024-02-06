@@ -70,17 +70,21 @@ class DownloadHandler():
 						break
 			return files
 
-	def listOfAllLinks(self, folder, fileEnding):
+	def listOfAllLinks(self, folder, fileEnding=None):
 		"""list all links saved in folder in Dict"""
 		links = list()
 		for file in self.listFiles(folder, fileEnding):
+			if os.path.basename(file)=="blackList.txt":
+				continue#skip
 			links[file] = self.loadLinks(file)
 		return links
 	
-	def dictOfAllLinks(self, folder, fileEnding):
+	def dictOfAllLinks(self, folder, fileEnding=None):
 		"""list all links saved in folder/files in List"""
 		links = dict()
 		for file in self.listFiles(folder, fileEnding):
+			if os.path.basename(file)=="blackList.txt":
+				continue#skip
 			links[file] = self.loadLinks(file)
 		return links
 
@@ -298,12 +302,12 @@ class Gui(tk.Tk):
 		log_frame.columnconfigure(0, weight=1)
 		
 		#log output
-		textbox = tk.Text(log_frame, height=6)
-		textbox.pack(side = tk.TOP)
-		textbox.insert('1.0', "...")
-		textbox.config(state='disabled')
-		scrollb = tk.Scrollbar(log_frame, command=textbox.yview)
-		textbox.config(yscrollcommand=scrollb.set)
+		self.textbox = tk.Text(log_frame, height=6)
+		self.textbox.pack(side = tk.TOP)
+		self.textbox.insert('1.0', "...")
+		self.textbox.config(state='disabled')
+		scrollb = tk.Scrollbar(log_frame, command=self.textbox.yview)
+		self.textbox.config(yscrollcommand=scrollb.set)
 		
 		useAuthentication_frame = tk.Frame(self)
 		useAuthentication_frame.pack(side = tk.TOP, padx='5', pady='5')
@@ -448,10 +452,10 @@ class Gui(tk.Tk):
 
 		#----------
 
-		self.link.set("https://www.youtube.com/watch?v=dOVvmUqmRCk")
-		self.playlist.set("https://www.youtube.com/playlist?list=UUwIgPuUJXuf2nY-nKsEvLOg")
-		self.channel.set("https://www.youtube.com/channel/UCwIgPuUJXuf2nY-nKsEvLOg")
-		self.file.set("C:/Users/toxin/Downloads/Youtube_Downloader/toDownloadLinks/test.txt")
+		self.link.set("")
+		self.playlist.set("")
+		self.channel.set("")
+		self.file.set("")
 		
 	def hideMediaSelectionFrame(self):
 		self.mediaSelection_frame.pack_forget()
@@ -535,15 +539,17 @@ class Gui(tk.Tk):
 		self.session.downloadFiles(fileName, audioOnly, authenticate)
 		
 	def processAllLinkFiles(self):
-		fileNames = self.session.listOfAllLinks(self.toDownloadLinksFolder)
+		fileNames = self.session.listOfAllLinks(self.session.toDownloadLinksFolder)
 		print("download all extracted Links from: "+str(len(fileNames))+" files.")
 		for path in fileNames:
 			print("download extracted Links from: "+path)
+			fileName = os.path.basename(path)
+			if fileName=="blackList.txt":
+				continue#skip
 			if self.removeDuplicateLinks.get():
 				[duplicates,checkedLinks,allDuplicateFiles] = self.session.findDuplicateLinks(fileName)
 				duplicateRemover = windowPopUp(duplicates,self.link)
 				self.session.deleteDuplicateLinks(fileName,checkedLinks,allDuplicateFiles,duplicateRemover.keepLink,duplicateRemover.deleteLink)
-			fileName = os.path.basename(path)
 			audioOnly = self.audioOnly.get()
 			authenticate = self.useAuthentication.get()
 			self.session.downloadFiles(fileName, audioOnly, authenticate)
@@ -662,20 +668,10 @@ class windowPopUp(tk.Toplevel):
 
 '''
 #TODO
--blackList
+-
 -update playlist from youtube
 -check files with downloadedLinks
 '''
 
 if __name__ == '__main__':
 	App = Gui().mainloop()
-
-'''
-url = "https://www.youtube.com/@wavemusic"
-"browseId":"UCbuK8xxu2P_sqoMnDsoBrrg"
-"https://www.youtube.com/playlist?list=UU"+"buK8xxu2P_sqoMnDsoBrrg"
-
-url = "https://www.youtube.com/@AirwaveMusicTV/videos"
-"browseId":"UCwIgPuUJXuf2nY-nKsEvLOg"
-"https://www.youtube.com/playlist?list=UU"+"wIgPuUJXuf2nY-nKsEvLOg"
-'''
