@@ -7,14 +7,15 @@ from pathvalidate import sanitize_filename
 import tkinter as tk
 import tkinter.filedialog
 import tkinter.ttk as ttk
-import time
 import traceback
-#print(traceback.format_exc())
+import threading
 
 class DownloadHandler():
 	toDownloadLinksFolder = 'toDownloadLinks'
 	downloadedLinksFolder = 'downloadedLinks'
 	downloadedFilesFolder = 'downloadedFiles'
+	messageBuffer = list()
+	#self.textbox.insert(tk.END, traceback.format_exc())
 
 	def __init__(self) -> None:
 		pass
@@ -34,10 +35,27 @@ class DownloadHandler():
 #		filename = filename.lower()
 		return filename
 
-	def saveLinks(self, links, file):
+	def saveLinks(self, links, path, sourceUrl):
 		'''save links to file in toDownloadLinksFolder'''
-		path = os.path.join(self.toDownloadLinksFolder,file)
-		with open(path,"a",encoding='utf-8') as f:
+		
+		#write url in first line if not already present
+		try:
+			with open(path,'r',encoding='utf-8') as f:
+				url = f.readline().strip('\n')
+				if url[0]!="#":
+					links.add(url)
+				else:
+					if url[1:]!="-":
+						sourceUrl = url[1:]
+						
+				for line in f:
+					links.add(line.strip('\n'))
+		except:
+			#file does not exist - so create it
+			self.messageBuffer.append("creating file "+str(path))
+			
+		with open(path,"w",encoding='utf-8') as f:
+			f.write('#%s\n' % sourceUrl)
 			while links:
 				link = links.pop()
 				f.write('%s\n' % link)
@@ -46,15 +64,20 @@ class DownloadHandler():
 	def loadLinks(self, path):
 		"""list links from path"""
 		links = list()
-		with open(path,"r",encoding='utf-8') as f:
-			for line in f:
-				line = line.strip('\n')
-				links.append(line)
+		try:
+			with open(path,"r",encoding='utf-8') as f:
+				for line in f:
+					line = line.strip('\n')
+					if line[0]!="#":
+						links.append(line)
+		except:
+			#link file does not exist
+			pass
 		return links
 
 	def listFiles(self, folder, fileEnding=None):
 		"""list all files saved in folder\n
-		(optionally with sspecific ending)"""
+		(optionally with specific ending)"""
 		fileList = list()
 		for (dirpath, dirnames, filenames) in os.walk(folder):
 			fileList.extend([os.path.join(dirpath,filename) for filename in filenames])
@@ -101,7 +124,9 @@ class DownloadHandler():
 		
 		#request channel page
 		response = requests.get(channelUrl)
-		response.raise_for_status()
+		if response.status_code != 200:
+			self.messageBuffer.append("failed to load channel url to extract playlist")
+		#response.raise_for_status()
 		body = response.text
 		
 		#extract playlist id
@@ -170,8 +195,8 @@ class DownloadHandler():
 						link = checkedLinks.pop()
 						f.write('%s\n' % link)
 			except Exception as ex:
-				print('error on: ',link)
-				print(ex)
+				self.messageBuffer.append('error opening file')
+				self.messageBuffer.append(str(ex))
 				failed.append([link]+checkedLinks)
 				raise
 			del checkedLinks
@@ -183,8 +208,8 @@ class DownloadHandler():
 							f.write('%s\n' % link)
 							del keepLink[link]
 			except Exception as ex:
-				print('error on: ',link)
-				print(ex)
+				self.messageBuffer.append('error on: '+str(link))
+				self.messageBuffer.append(str(ex))
 				failed.append(list(keepLink.values()))
 				raise
 			
@@ -192,10 +217,10 @@ class DownloadHandler():
 				
 			#remove links from all other files
 			for duplicateFile in allDuplicateFiles: #choose one file
-				print(duplicateFile)
+				self.messageBuffer.append(str(duplicateFile))
 				toRemove = list()
 				for link,filePaths in deleteLink.items(): #loop over all links
-					print(link)
+					self.messageBuffer.append(str(link))
 					if duplicateFile in filePaths: #check if link is in choosen file
 						toRemove.append(link)
 				if toRemove:
@@ -215,8 +240,8 @@ class DownloadHandler():
 							f.write('%s\n' % link)
 					#if successful: replace duplicateFile with duplicateFile+".temp"
 					os.replace(duplicateFile+".temp",duplicateFile)
-		except KeyboardInterrupt:
-			print('Interrupted')
+		except:
+			self.messageBuffer.append('Interrupted')
 			with open(newLinksPath,'w',encoding='utf-8') as ff:
 				for item in failed:
 					item = item.strip('\n')
@@ -227,19 +252,38 @@ class DownloadHandler():
 
 	### download loop
 	def downloadFiles(self, newLinksFile, downloadOnlyAudio=True, authenticate=False):
-		newLinksPath = os.path.join(self.toDownloadLinksFolder,newLinksFile)
+		downloadedLinks = self.loadLinks(os.path.join(self.downloadedLinksFolder,newLinksFile))
+		blackList = self.loadLinks('toDownloadLinks/blackList.txt')
 		failed = list()
 		try:
-			with open(newLinksPath,'r',encoding='utf-8') as f:
-				with open(os.path.join(self.downloadedLinksFolder,newLinksFile),'w',encoding='utf-8') as ff:
-					url_list = f.readlines()
+			with open(os.path.join(self.toDownloadLinksFolder,newLinksFile),'r',encoding='utf-8') as f:
+				line = f.readline().strip('\n')
+				url_list = f.readlines()
+				
+				playlistUrl = "-"
+				if line[0]=="#":
+					playlistUrl = line[1:]
+				else:
+					url_list.append(line)
+				
+				if not os.path.exists( os.path.join(self.downloadedLinksFolder,newLinksFile) ):
+					with open(os.path.join(self.downloadedLinksFolder,newLinksFile),'w',encoding='utf-8') as ff:
+						ff.write('#%s\n' % playlistUrl)
+				
+				with open(os.path.join(self.downloadedLinksFolder,newLinksFile),'a',encoding='utf-8') as ff:
+					
 					numElements = len(url_list)
 					for iter in range(numElements):
-						print('-----'+str(iter+1)+'/'+str(numElements)+'-----')
+						self.messageBuffer.append('-----'+str(iter+1)+'/'+str(numElements)+'-----')
 						line = url_list.pop()
 						line = line.strip('\n')
+						if line in blackList:
+							failed.append(line)
+							continue#skip
+						if line in downloadedLinks:
+							continue#skip
 						try:
-							print('downloading: ',line)
+							self.messageBuffer.append('downloading: '+str(line))
 							if authenticate:
 								vid = pytube.YouTube("http://youtube.com/watch?v="+line,
 														 use_oauth=True, allow_oauth_cache=True)
@@ -259,33 +303,83 @@ class DownloadHandler():
 								ffmpeg.concat(input_video, input_audio, v=1, a=1).output('./processed_folder/finished_video.mp4').run()
 								'''
 							#download
-							#stream.download(self.downloadedFilesFolder)
+							playlistName = newLinksFile[:-4]
+							filename = "["+self.filterName( playlistName )+"]"
 							pos = stream.default_filename.rindex(".")
-							filename = self.filterName( stream.default_filename[:pos] )
+							filename += self.filterName( stream.default_filename[:pos] )
 							filename += "("+str(line)+")"
 							filename += stream.default_filename[pos:]
-							stream.download( filename = os.path.join(self.downloadedFilesFolder,filename) )
+							filePath = os.path.join(self.downloadedFilesFolder,filename)
+							stream.download( filename = filePath )
+							if downloadOnlyAudio:
+								self.messageBuffer.append('---converting to mp3: '+filename)
+								audioclip = AudioFileClip(filePath)
+								audioclip.write_audiofile(filePath[:-4]+'.mp3')
+								self.messageBuffer.append('---removing: '+filename)
+								audioclip.close()
+								os.remove(filePath)
 							ff.write('%s\n' % line)
 						except Exception as ex:
-							print('error on: ',line)
-							print(ex)
+							self.messageBuffer.append('error on: '+str(line))
+							self.messageBuffer.append(str(ex))
 							failed.append(line)
-							raise
+							#raise
 		except KeyboardInterrupt:
-			print('Interrupted')
-			with open(newLinksPath,'w',encoding='utf-8') as fff:
-				for item in (url_list+failed):
+			self.messageBuffer.append('Interrupted')
+			with open(os.path.join(self.toDownloadLinksFolder,newLinksFile),'w',encoding='utf-8') as fff:
+				fff.write('#%s\n' % playlistUrl)
+				for item in set(url_list+failed):
 					item = item.strip('\n')
 					fff.write('%s\n' % item)
 			sys.exit(0)
+		except Exception as ex:
+			self.messageBuffer.append('error opening link file')
+		
+		with open(os.path.join(self.toDownloadLinksFolder,newLinksFile),'w',encoding='utf-8') as fff:
+			fff.write('#%s\n' % playlistUrl)
+			for item in set(url_list+failed):
+				item = item.strip('\n')
+				fff.write('%s\n' % item)
+				
+		return None
 	
-	def Mp4ToMp3(self,filename):
-		print('---converting to mp3: ',filename)
+	def updateList(self, filepath):
+		"""update links from playlist"""
+		#get url
+		with open(filepath,'r',encoding='utf-8') as f:
+			url = f.readline().strip('\n')
+		if url[0] != "#":
+			self.messageBuffer.append('no url for updating playlist present!')
+			return None
+		else:
+			playlistUrl = url[1:]
+		
+		#get all links
+		[links, playlistName, _] = self.session.collectLinks(playlistUrl)
+		
+		#remove already present links
+		downloaded = self.loadLinks(filepath)
+		
+		for link in downloaded:
+			if link[0]=="#":
+				continue#skip
+			if link in links:
+				links.remove(link)
+		
+		#save
+		self.session.saveLinks(links, filepath, playlistUrl)
+		
+		return None
+	
+	def Mp4ToMp3(self, filename):
+		self.messageBuffer.append('---converting to mp3: '+str(filename))
 		audioclip = AudioFileClip(filename)
 		audioclip.write_audiofile(filename[:-4]+'.mp3')
-		print('---removing: ',filename)
+		self.messageBuffer.append('---removing: '+str(filename))
 		os.remove(filename)
 		audioclip.close()
+
+
 
 ### GUI
 
@@ -304,7 +398,7 @@ class Gui(tk.Tk):
 		#log output
 		self.textbox = tk.Text(log_frame, height=6)
 		self.textbox.pack(side = tk.TOP)
-		self.textbox.insert('1.0', "...")
+		self.textbox.insert(tk.END, "...")
 		self.textbox.config(state='disabled')
 		scrollb = tk.Scrollbar(log_frame, command=self.textbox.yview)
 		self.textbox.config(yscrollcommand=scrollb.set)
@@ -443,20 +537,38 @@ class Gui(tk.Tk):
 		self.file_button.pack(side = tk.LEFT, padx='5', pady='5')
 
 		#all Linklists	-> extract/download
-		self.allFiles_frame = tk.Frame(self)
-		self.allFiles_frame.pack(side = tk.TOP, padx='5', pady='5')
+		self.downloadAllFiles_frame = tk.Frame(self)
+		self.downloadAllFiles_frame.pack(side = tk.TOP, padx='5', pady='5')
 
-		self.allFiles_button = tk.Button(self.allFiles_frame, command=self.processAllLinkFiles,
+		self.downloadAllFiles_button = tk.Button(self.downloadAllFiles_frame, command=self.processAllLinkFiles,
 									 text='download All extracted', width = 24)
-		self.allFiles_button.pack(side = tk.LEFT, padx='5', pady='5')
+		self.downloadAllFiles_button.pack(side = tk.LEFT, padx='5', pady='5')
+
+		#all Linklists	-> update
+		self.updateAllFiles_frame = tk.Frame(self)
+		self.updateAllFiles_frame.pack(side = tk.TOP, padx='5', pady='5')
+
+		self.updateAllFiles_button = tk.Button(self.updateAllFiles_frame, command=self.updatePlaylist,
+									 text='update All extracted', width = 24)
+		self.updateAllFiles_button.pack(side = tk.LEFT, padx='5', pady='5')
 
 		#----------
 
-		self.link.set("")
-		self.playlist.set("")
-		self.channel.set("")
-		self.file.set("")
+#		self.link.set("")
+#		self.playlist.set("")
+#		self.channel.set("")
+#		self.file.set("")
 		
+		self.updateTextbox()
+		
+	def updateTextbox(self):
+		while len(self.session.messageBuffer):
+			message = self.session.messageBuffer.pop()
+			print(message)
+			self.textbox.insert(tk.END, message )
+		#restart function in 1s
+		threading.Timer(1, self.updateTextbox).start()
+	
 	def hideMediaSelectionFrame(self):
 		self.mediaSelection_frame.pack_forget()
 			
@@ -476,17 +588,42 @@ class Gui(tk.Tk):
 	
 	def processLink(self):
 		linkUrl = str(self.link.get())
+		channelName = pytube.YouTube(linkUrl).author
+		channelUrl = pytube.YouTube(linkUrl).channel_url
+		
+		#request channel page
+#		response = requests.get(channelUrl)
+#		if response.status_code != 200:
+#			self.messageBuffer.append("failed to load channel url to extract playlist")
+#		response.raise_for_status()
+#		body = response.text
+		
+		#extract playlist id
+#		keyword = "\"browseId\":\"UC"
+#		pos1 = body.find(keyword)+len(keyword)
+#		pos2 = body.find("\"",pos1)
+#		playlistUrl = "https://www.youtube.com/playlist?list=UU"
+#		playlistUrl += body[pos1:pos2]
+		
+#		playlist = pytube.Playlist(playlistUrl)
+#		links = playlist.video_urls
+#		links = [self.session.filterId(link) for link in links]
+#		playlistName = playlist.title
+#		channelName = playlist.owner
+		
 		links = [self.session.filterId(linkUrl)]
-		fileName = "singleLinks.txt"
-		self.session.saveLinks(links, fileName)
+
+		fileName = channelName+".txt"
+		filePath = os.path.join(self.session.toDownloadLinksFolder,fileName)
+		self.session.saveLinks(links, filePath, '-') #playlistUrl
 		if self.removeDuplicateLinks.get():
 			[duplicates,checkedLinks,allDuplicateFiles] = self.session.findDuplicateLinks(fileName)
 			duplicateRemover = windowPopUp(duplicates,self.link)
 			self.session.deleteDuplicateLinks(fileName,checkedLinks,allDuplicateFiles,duplicateRemover.keepLink,duplicateRemover.deleteLink)
 		if self.extractOnly.get():
-			print("extracted link: "+linkUrl)
+			self.textbox.insert(tk.END, "extracted link: "+linkUrl)
 		else:
-			print("downloading link: "+linkUrl)
+			self.textbox.insert(tk.END, "downloading link: "+linkUrl)
 			audioOnly = self.audioOnly.get()
 			authenticate = self.useAuthentication.get()
 			self.session.downloadFiles(fileName, audioOnly, authenticate)
@@ -494,16 +631,20 @@ class Gui(tk.Tk):
 	def processPlaylist(self):
 		playlistUrl = str(self.playlist.get())
 		[links, playlistName, channelName] = self.session.collectLinks(playlistUrl)
-		fileName = playlistName+".txt"
-		self.session.saveLinks(links, fileName)
+		if playlistName[:13]=="Uploads from ":
+			fileName = playlistName[13:]+".txt"
+		else:
+			fileName = playlistName+".txt"
+		filePath = os.path.join(self.session.toDownloadLinksFolder,fileName)
+		self.session.saveLinks(links, filePath, playlistUrl)
 		if self.removeDuplicateLinks.get():
 			[duplicates,checkedLinks,allDuplicateFiles] = self.session.findDuplicateLinks(fileName)
-			duplicateRemover = windowPopUp(duplicates,self.link)
+			duplicateRemover = windowPopUp(duplicates,...)
 			self.session.deleteDuplicateLinks(fileName,checkedLinks,allDuplicateFiles,duplicateRemover.keepLink,duplicateRemover.deleteLink)
 		if self.extractOnly.get():
-			print("extracted playlist: "+playlistUrl)
+			self.textbox.insert(tk.END, "extracted playlist: "+playlistName)
 		else:
-			print("downloading playlist: "+playlistUrl)
+			self.textbox.insert(tk.END, "downloading playlist: "+playlistName)
 			audioOnly = self.audioOnly.get()
 			authenticate = self.useAuthentication.get()
 			self.session.downloadFiles(fileName, audioOnly, authenticate)
@@ -513,23 +654,24 @@ class Gui(tk.Tk):
 		[playlistUrl, channelName] = self.session.channelPlaylist(channelUrl)
 		[links, playlistName, _] = self.session.collectLinks(playlistUrl)
 		fileName = channelName+".txt"
-		self.session.saveLinks(links, fileName)
+		filePath = os.path.join(self.session.toDownloadLinksFolder,fileName)
+		self.session.saveLinks(links, filePath, playlistUrl)
 		if self.removeDuplicateLinks.get():
 			[duplicates,checkedLinks,allDuplicateFiles] = self.session.findDuplicateLinks(fileName)
-			duplicateRemover = windowPopUp(duplicates,self.link)
+			duplicateRemover = windowPopUp(duplicates,...)
 			self.session.deleteDuplicateLinks(fileName,checkedLinks,allDuplicateFiles,duplicateRemover.keepLink,duplicateRemover.deleteLink)
 		if self.extractOnly.get():
-			print("extracted channel: "+channelUrl)
+			self.textbox.insert(tk.END, "extracted channel: "+playlistName)
 		else:
-			print("downloading channel: "+channelUrl)
+			self.textbox.insert(tk.END, "downloading channel: "+playlistName)
 			audioOnly = self.audioOnly.get()
 			authenticate = self.useAuthentication.get()
 			self.session.downloadFiles(fileName, audioOnly, authenticate)
 	
 	def processLinkFile(self):
 		path = self.file.get()
-		fileName = os.path.basename( self.session.loadLinks(path) )
-		print("download extracted Links from: "+path)
+		fileName = os.path.basename(path)
+		self.textbox.insert(tk.END, "download extracted Links from: "+path)
 		if self.removeDuplicateLinks.get():
 			[duplicates,checkedLinks,allDuplicateFiles] = self.session.findDuplicateLinks(fileName)
 			duplicateRemover = windowPopUp(duplicates,self.link)
@@ -540,9 +682,9 @@ class Gui(tk.Tk):
 		
 	def processAllLinkFiles(self):
 		fileNames = self.session.listOfAllLinks(self.session.toDownloadLinksFolder)
-		print("download all extracted Links from: "+str(len(fileNames))+" files.")
+		self.textbox.insert(tk.END, "download all extracted Links from: "+str(len(fileNames))+" files.")
 		for path in fileNames:
-			print("download extracted Links from: "+path)
+			self.textbox.insert(tk.END, "download extracted Links from: "+path)
 			fileName = os.path.basename(path)
 			if fileName=="blackList.txt":
 				continue#skip
@@ -553,6 +695,16 @@ class Gui(tk.Tk):
 			audioOnly = self.audioOnly.get()
 			authenticate = self.useAuthentication.get()
 			self.session.downloadFiles(fileName, audioOnly, authenticate)
+
+	def updatePlaylist(self):
+		for (dirpath, dirnames, filenames) in os.walk(self.session.downloadedLinksFolder):
+			for filename in filenames:
+				filepath = os.path.join(dirpath,filename)
+				self.session.updateList(filepath)
+		for (dirpath, dirnames, filenames) in os.walk(self.session.toDownloadLinksFolder):
+			for filename in filenames:
+				filepath = os.path.join(dirpath,filename)
+				self.session.updateList(filepath)
 
 
 
@@ -665,13 +817,6 @@ class windowPopUp(tk.Toplevel):
 			self.deleteLink[link] = presentFiles
 		self.destroy()
 		return None
-
-'''
-#TODO
--
--update playlist from youtube
--check files with downloadedLinks
-'''
 
 if __name__ == '__main__':
 	App = Gui().mainloop()

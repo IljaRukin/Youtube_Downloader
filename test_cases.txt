@@ -1,8 +1,0 @@
-
-link / channel / playlist
-selected/all extracted
-
-useAuthentication
-removeDuplicateLinks
-extractOnly
-audioOnly
