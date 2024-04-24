@@ -21,59 +21,106 @@ class DownloadHandler():
 		pass
 
 	def filterId(self, link):
-		'''extract video id\n
-		used for collecting urls from playlist'''
+		'''extract video id from url'''
 		link = link.strip('\n')
 		pos = link.find("?v=")
 		return link[pos+3:pos+13+1]
 
 	def filterName(self, filename):
-		'''make filename valid for windows\n
-		used for dowloading'''
+		'''make filename valid for windows'''
 		filename = filename.replace('\n','')
 		filename = sanitize_filename(filename)
 #		filename = filename.lower()
 		return filename
 
-	def saveLinks(self, links, path, sourceUrl):
+	def saveLinks(self, links, path, sourceUrl, names=None):
 		'''save links to file in toDownloadLinksFolder'''
+		if names==None or len(links)!=len(names):
+			names = list()
+			for link in links:
+				try:
+					vid = pytube.YouTube("http://youtube.com/watch?v="+link)
+					name = self.filterName( vid.title )
+					names.append(name)
+				except:
+					names.append('-')
 		
-		#write url in first line if not already present
 		try:
+			#read contents of already present file
 			with open(path,'r',encoding='utf-8') as f:
+				#read playlist url from first line
 				url = f.readline().strip('\n')
 				if url[0]!="#":
-					links.add(url)
+					commentStart = url.find("#")
+					if commentStart>=0:
+						names.append(url[commentStart+1:])
+						links.append(url[commentStart:])
+					else:
+						names.append("-")
+						links.append(url)
 				else:
 					if url[1:]!="-":
 						sourceUrl = url[1:]
-						
+				
+				#read link from file untill start of comment "#" -> add to link
+				#read comment -> add to names
 				for line in f:
-					links.add(line.strip('\n'))
+					line = line.strip("\n")
+					commentStart = line.find("#")
+					if commentStart>0:
+						names.append(line[commentStart+1:])
+						links.append(line[commentStart:])
+					else:
+						names.append("-")
+						links.append(line)
 		except:
 			#file does not exist - so create it
 			self.messageBuffer.append("creating file "+str(path))
-			
+		
+		#write all links & comments to file
 		with open(path,"w",encoding='utf-8') as f:
 			f.write('#%s\n' % sourceUrl)
 			while links:
 				link = links.pop()
-				f.write('%s\n' % link)
+				name = names.pop()
+				f.write('%s #%s\n' % (link,name))
 		return None
 
 	def loadLinks(self, path):
 		"""list links from path"""
 		links = list()
+		names = list()
 		try:
 			with open(path,"r",encoding='utf-8') as f:
+				#read playlist url from first line
+				url = f.readline().strip('\n')
+				if url[0]!="#":
+					commentStart = url.find("#")
+					if commentStart>=0:
+						names.append(url[commentStart+1:])
+						links.append(url[commentStart:])
+					else:
+						names.append("-")
+						links.append(url)
+				else:
+					if url[1:]!="-":
+						sourceUrl = url[1:]
+				
+				#read link from file untill start of comment "#" -> add to link
+				#read comment -> add to names
 				for line in f:
-					line = line.strip('\n')
-					if line[0]!="#":
+					line = line.strip("\n")
+					commentStart = line.find("#")
+					if commentStart>0:
+						names.append(line[commentStart+1:])
+						links.append(line[commentStart:])
+					else:
+						names.append("-")
 						links.append(line)
 		except:
-			#link file does not exist
-			pass
-		return links
+			#file does not exist - so create it
+			self.messageBuffer.append("creating file "+str(path))
+		return links,names
 
 	def listFiles(self, folder, fileEnding=None):
 		"""list all files saved in folder\n
@@ -99,7 +146,7 @@ class DownloadHandler():
 		for file in self.listFiles(folder, fileEnding):
 			if os.path.basename(file)=="blackList.txt":
 				continue#skip
-			links[file] = self.loadLinks(file)
+			[links[file],_] = self.loadLinks(file)
 		return links
 	
 	def dictOfAllLinks(self, folder, fileEnding=None):
@@ -108,7 +155,7 @@ class DownloadHandler():
 		for file in self.listFiles(folder, fileEnding):
 			if os.path.basename(file)=="blackList.txt":
 				continue#skip
-			links[file] = self.loadLinks(file)
+			[links[file],_] = self.loadLinks(file)
 		return links
 
 	def collectLinks(self, playlistUrl):
@@ -154,7 +201,7 @@ class DownloadHandler():
 		duplicates = dict()
 		
 		#read all links
-		newLinksList = self.loadLinks(newLinksPath)
+		[newLinksList,newNamesList] = self.loadLinks(newLinksPath)
 		newLinksList = list(set(newLinksList))
 		
 		#check all files on duplicates
@@ -249,46 +296,61 @@ class DownloadHandler():
 			sys.exit(0)
 
 		return None
-
+	
 	### download loop
 	def downloadFiles(self, newLinksFile, downloadOnlyAudio=True, authenticate=False):
-		downloadedLinks = self.loadLinks(os.path.join(self.downloadedLinksFolder,newLinksFile))
-		blackList = self.loadLinks('toDownloadLinks/blackList.txt')
-		failed = list()
+		[downloadedLinks,downloadedNames] = self.loadLinks(os.path.join(self.downloadedLinksFolder,newLinksFile))
+		[blackList,_] = self.loadLinks('toDownloadLinks/blackList.txt')
+		failedLinks = list()
+		failedNames = list()
 		try:
 			with open(os.path.join(self.toDownloadLinksFolder,newLinksFile),'r',encoding='utf-8') as f:
-				line = f.readline().strip('\n')
-				url_list = f.readlines()
+				#read playlist url from first line
+				firstLine = f.readline().strip('\n')
+				lines = f.readlines()
 				
-				playlistUrl = "-"
-				if line[0]=="#":
-					playlistUrl = line[1:]
+				#read playlist url from first line
+				sourceUrl = "-"
+				if firstLine[0]!="#":
+					lines.append(firstLine)
 				else:
-					url_list.append(line)
+					if firstLine[1:]!="-":
+						sourceUrl = firstLine[1:]
 				
 				if not os.path.exists( os.path.join(self.downloadedLinksFolder,newLinksFile) ):
 					with open(os.path.join(self.downloadedLinksFolder,newLinksFile),'w',encoding='utf-8') as ff:
-						ff.write('#%s\n' % playlistUrl)
+						ff.write('#%s\n' % sourceUrl)
 				
 				with open(os.path.join(self.downloadedLinksFolder,newLinksFile),'a',encoding='utf-8') as ff:
 					
-					numElements = len(url_list)
+					numElements = len(lines)
 					for iter in range(numElements):
 						self.messageBuffer.append('-----'+str(iter+1)+'/'+str(numElements)+'-----')
-						line = url_list.pop()
+						line = lines.pop()
 						line = line.strip('\n')
+						
+						#remove name from comment
+						commentStart = line.find("#")
+						if commentStart>0:
+							name = line[commentStart+1:]
+							link = line[:commentStart-1]
+						else:
+							name = "-"
+							link = line
+						
 						if line in blackList:
-							failed.append(line)
+							failedLinks.append(link)
+							failedNames.append(name)
 							continue#skip
 						if line in downloadedLinks:
 							continue#skip
 						try:
 							self.messageBuffer.append('downloading: '+str(line))
 							if authenticate:
-								vid = pytube.YouTube("http://youtube.com/watch?v="+line,
+								vid = pytube.YouTube("http://youtube.com/watch?v="+link,
 														 use_oauth=True, allow_oauth_cache=True)
 							else:
-								vid = pytube.YouTube("http://youtube.com/watch?v="+line)
+								vid = pytube.YouTube("http://youtube.com/watch?v="+link)
 							if downloadOnlyAudio:
 								#stream = vid.streams.filter(only_audio=True).order_by('resolution').desc().first()
 								stream = vid.streams.filter(only_audio=True).get_audio_only()
@@ -305,9 +367,11 @@ class DownloadHandler():
 							#download
 							playlistName = newLinksFile[:-4]
 							filename = "["+self.filterName( playlistName )+"]"
+							#name = self.filterName( vid.title )
 							pos = stream.default_filename.rindex(".")
-							filename += self.filterName( stream.default_filename[:pos] )
-							filename += "("+str(line)+")"
+							name = self.filterName( stream.default_filename[:pos] )
+							filename += name
+							filename += "("+str(link)+")"
 							filename += stream.default_filename[pos:]
 							filePath = os.path.join(self.downloadedFilesFolder,filename)
 							stream.download( filename = filePath )
@@ -318,28 +382,32 @@ class DownloadHandler():
 								self.messageBuffer.append('---removing: '+filename)
 								audioclip.close()
 								os.remove(filePath)
+								
 							ff.write('%s\n' % line)
 						except Exception as ex:
 							self.messageBuffer.append('error on: '+str(line))
 							self.messageBuffer.append(str(ex))
-							failed.append(line)
+							if line not in failedLinks:
+								failedLinks.append(link)
+								failedNames.append(name)
 							#raise
 		except KeyboardInterrupt:
 			self.messageBuffer.append('Interrupted')
 			with open(os.path.join(self.toDownloadLinksFolder,newLinksFile),'w',encoding='utf-8') as fff:
-				fff.write('#%s\n' % playlistUrl)
-				for item in set(url_list+failed):
-					item = item.strip('\n')
-					fff.write('%s\n' % item)
-			sys.exit(0)
+				fff.write('#%s\n' % sourceUrl)
+				for line in lines:
+					fff.write('%s \n' % line.strip('\n') )
+				for link,name in zip(failedLinks,failedNames):
+					fff.write('%s #%s\n' % (link,name))
 		except Exception as ex:
 			self.messageBuffer.append('error opening link file')
 		
 		with open(os.path.join(self.toDownloadLinksFolder,newLinksFile),'w',encoding='utf-8') as fff:
-			fff.write('#%s\n' % playlistUrl)
-			for item in set(url_list+failed):
-				item = item.strip('\n')
-				fff.write('%s\n' % item)
+			fff.write('#%s\n' % sourceUrl)
+			for line in lines:
+				fff.write('%s \n' % line.strip('\n') )
+			for link,name in zip(failedLinks,failedNames):
+				fff.write('%s #%s\n' % (link,name))
 				
 		return None
 	
@@ -358,9 +426,9 @@ class DownloadHandler():
 		[links, playlistName, _] = self.session.collectLinks(playlistUrl)
 		
 		#remove already present links
-		downloaded = self.loadLinks(filepath)
+		[downloadedLinks,downloadedNames] = self.loadLinks(filepath)
 		
-		for link in downloaded:
+		for link in downloadedLinks:
 			if link[0]=="#":
 				continue#skip
 			if link in links:
@@ -588,8 +656,10 @@ class Gui(tk.Tk):
 	
 	def processLink(self):
 		linkUrl = str(self.link.get())
-		channelName = pytube.YouTube(linkUrl).author
-		channelUrl = pytube.YouTube(linkUrl).channel_url
+		vid = pytube.YouTube(linkUrl)
+		channelName = vid.author
+		channelUrl = vid.channel_url
+		name = vid.title
 		
 		#request channel page
 #		response = requests.get(channelUrl)
@@ -612,8 +682,10 @@ class Gui(tk.Tk):
 #		channelName = playlist.owner
 		
 		links = [self.session.filterId(linkUrl)]
+		names = [self.session.filterName(name)]
 
 		fileName = channelName+".txt"
+		fileName = self.session.filterName(fileName)
 		filePath = os.path.join(self.session.toDownloadLinksFolder,fileName)
 		self.session.saveLinks(links, filePath, '-') #playlistUrl
 		if self.removeDuplicateLinks.get():
@@ -635,6 +707,7 @@ class Gui(tk.Tk):
 			fileName = playlistName[13:]+".txt"
 		else:
 			fileName = playlistName+".txt"
+		fileName = self.session.filterName(fileName)
 		filePath = os.path.join(self.session.toDownloadLinksFolder,fileName)
 		self.session.saveLinks(links, filePath, playlistUrl)
 		if self.removeDuplicateLinks.get():
@@ -654,6 +727,7 @@ class Gui(tk.Tk):
 		[playlistUrl, channelName] = self.session.channelPlaylist(channelUrl)
 		[links, playlistName, _] = self.session.collectLinks(playlistUrl)
 		fileName = channelName+".txt"
+		fileName = self.session.filterName(fileName)
 		filePath = os.path.join(self.session.toDownloadLinksFolder,fileName)
 		self.session.saveLinks(links, filePath, playlistUrl)
 		if self.removeDuplicateLinks.get():
@@ -671,6 +745,7 @@ class Gui(tk.Tk):
 	def processLinkFile(self):
 		path = self.file.get()
 		fileName = os.path.basename(path)
+		fileName = self.session.filterName(fileName)
 		self.textbox.insert(tk.END, "download extracted Links from: "+path)
 		if self.removeDuplicateLinks.get():
 			[duplicates,checkedLinks,allDuplicateFiles] = self.session.findDuplicateLinks(fileName)
