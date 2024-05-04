@@ -447,15 +447,52 @@ class DownloadHandler():
 		os.remove(filename)
 		audioclip.close()
 
+class right_click_handler():
+	def __init__(self, root):
+		#right click menu
+		self.m = tk.Menu(root, tearoff=0)
+		self.m.add_command(label="Cut",command=self.doCut)
+		self.m.add_command(label="Copy",command=self.doCopy)
+		self.m.add_command(label="Paste",command=self.doPaste)
+	def doCut(self):
+		selected = self.element.selection_get()
+		self.element.delete("sel.first", "sel.last")
+		self.element.clipboard_clear()
+		self.element.clipboard_append(selected)
+		return
+		
+	def doCopy(self):
+		selected = self.element.selection_get()
+		self.element.clipboard_clear()
+		self.element.clipboard_append(selected)
+		return
+		
+	def doPaste(self):
+		clipboard = self.element.clipboard_get()
+		try:
+			self.element.delete("sel.first", "sel.last")
+		except:
+			pass
+		position = self.element.index(tk.INSERT)
+		self.element.insert(position, clipboard)
+		return
+		
+	def right_click_popup(self, event): 
+		try:
+			self.element = event.widget
+			self.m.tk_popup(event.x_root, event.y_root)
+		finally: 
+			self.m.grab_release() 
+
 
 
 ### GUI
-
 class Gui(tk.Tk):
 	def __init__(self):
 		self.session = DownloadHandler()
 		
 		super().__init__()
+		rightClickHandler = right_click_handler(self)
 		self.title("Youtube Downloader")
 
 		log_frame = tk.Frame(self)
@@ -559,6 +596,7 @@ class Gui(tk.Tk):
 		self.link_entry = tk.Entry(self.link_frame, textvariable = self.link,
 								 font=('calibre',10,'normal'), width = 50)
 		self.link_entry.pack(side = tk.LEFT, padx='5', pady='5')
+		self.link_entry.bind("<Button-3>", rightClickHandler.right_click_popup)
 		self.link_button = tk.Button(self.link_frame, command=self.processLink,
 									 text='one Link', width = 14)
 		self.link_button.pack(side = tk.LEFT, padx='5', pady='5')
@@ -568,9 +606,10 @@ class Gui(tk.Tk):
 		self.playlist_frame.pack(side = tk.TOP, padx='5', pady='5')
 
 		self.playlist = tk.StringVar()
-		self.link_entry = tk.Entry(self.playlist_frame, textvariable = self.playlist,
+		self.playlist_entry = tk.Entry(self.playlist_frame, textvariable = self.playlist,
 								 font=('calibre',10,'normal'), width = 50)
-		self.link_entry.pack(side = tk.LEFT, padx='5', pady='5')
+		self.playlist_entry.pack(side = tk.LEFT, padx='5', pady='5')
+		self.playlist_entry.bind("<Button-3>", rightClickHandler.right_click_popup)
 		self.playlist_button = tk.Button(self.playlist_frame, command=self.processPlaylist,
 									 text='full Playlist', width = 14)
 		self.playlist_button.pack(side = tk.LEFT, padx='5', pady='5')
@@ -583,6 +622,7 @@ class Gui(tk.Tk):
 		self.channel_entry = tk.Entry(self.channel_frame, textvariable = self.channel,
 								 font=('calibre',10,'normal'), width = 50)
 		self.channel_entry.pack(side = tk.LEFT, padx='5', pady='5')
+		self.channel_entry.bind("<Button-3>", rightClickHandler.right_click_popup)
 		self.channel_button = tk.Button(self.channel_frame, command=self.processChannel,
 									text='Channel uploads', width = 14)
 		self.channel_button.pack(side = tk.LEFT, padx='5', pady='5')
@@ -869,9 +909,9 @@ class windowPopUp(tk.Toplevel):
 		wrapFrame = canvas.create_window((0,0), window=frame, anchor="nw")
 		
 		def onFrameConfigure(canvas):
-		    canvas.configure(scrollregion=canvas.bbox("all")) #show scroll bar
-		    canvas.itemconfigure(wrapFrame, width=canvas.winfo_width()) #correct canvas size
-		    return None
+			canvas.configure(scrollregion=canvas.bbox("all")) #show scroll bar
+			canvas.itemconfigure(wrapFrame, width=canvas.winfo_width()) #correct canvas size
+			return None
 		canvas.bind("<Configure>", lambda e: onFrameConfigure(canvas))
 		
 		# expand canvas
